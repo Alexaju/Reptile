@@ -1,28 +1,16 @@
 import requests
 import json
 import pandas as pd
+import numpy as np
 import time
 requests.packages.urllib3.disable_warnings()
 
-Nation = pd.read_csv("NATION.csv") # Nations and nationality file for string comparison#
+Nation = pd.read_csv("NATION.csv")
 
-################################################
-def ifna(name,ele):
-    if name in list(ele.keys()):
-        return False
-    else:
-        return True
+AN = pd.read_csv("AN.csv")
+AA = pd.read_csv("author2.csv")
 
-def ifeduc(des):
-    univ = ['university','University','universities','institute','organization','institution','Academy','research laboratories','laboratory','academy']
-    for i in range(len(univ)):
-        if univ[i] in [des]:
-            return 1
-
-    return 0
-
-
-def databyYear(text,head):
+def clearup(text,head):
     l = len(text)
     if l <=5:
         ct = [None] * l
@@ -40,30 +28,16 @@ def databyYear(text,head):
             yr[i] = head+str(temp[i]['year'])
     return pd.DataFrame([ct], columns=yr)
 
-def getField(df):
-    fieldslist = df['paperResult']['fieldsOfStudy']
-    l = len(fieldslist)
-    Fields = ""
-    for i in range(l):
-        if not ('displayName' in list(fieldslist[i].keys())):
-            Fields = Fields + 'nan'+ ','
-        else:
-            Fields = Fields + fieldslist[i]['displayName'] + ','
-    return Fields
-    
-###############################################
+def postsearch(url,page,filt):
+    payloadData = {
+         "query":"artificial intelligence",
+         "queryExpression":"@@@Composite(F.FN=='artificial intelligence')",
+        "filters":filt,
+         "orderBy":0,
+         "skip":page,
+         "sortAscending":'true',
+         "take":10}
 
-def postsearch(url,page):
-    payloadData = {"query":"artificial intelligence",
-                   "queryExpression":"@@@Composite(F.FN=='artificial intelligence')",
-                   #"filters":["Pt='3'","Composite(F.FId=154945302)","Composite(C.CId=1158167855)","Y>=2015"],
-                   #"filters": ["Pt='3'", "Composite(F.FId=154945302)","Composite(C.CId=2584161585)", "Y>=2015"],
-                   #"filters":["Pt='3'", "Composite(F.FId=154945302)", "Composite(C.CId=1184914352)", "Y>=2015"],
-                   "filters": ["Pt='3'", "Composite(F.FId=154945302)", "Composite(C.CId=1180662882)", "Y>=2015"],
-                   "orderBy":0,
-                   "skip":page,
-                   "sortAscending":'true',
-                   "take":10}
     payloadHeader = {
         'accept': 'application/json',
         'content-type': 'application/json',
@@ -74,7 +48,7 @@ def postsearch(url,page):
     while res=='':
 
         try:
-            res = requests.post(url, json=payloadData, headers=payloadHeader, verify=False)
+            res = requests.post(url, json=payloadData, headers=payloadHeader, verify=False,timeout=10)
         except:
             print('sleep for 5 sec before retry')
             time.sleep(5)
@@ -83,7 +57,58 @@ def postsearch(url,page):
     content = res.json()
     return content
 
+def CountrySearch(ID):
 
+    u = 'https://academic.microsoft.com/api/entity/'
+    link = u + str(ID)+ '?entityType=6'
+    header = {'accept': 'application/json',
+        #'content-type': 'application/json',
+        'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/73.0.3683.86 Safari/537.36'
+    }
+    res = ''
+    while res == '':
+        try:
+            res = requests.get(url=link,headers=header, verify=False,timeout=10)
+        except:
+            print('sleep for 5 sec before retry')
+            time.sleep(5)
+            continue
+
+    globals = {
+        'true': 0,
+        'false': 1
+    }
+    if len(res.text)==0:
+        return 'NA',0
+    try:
+        content = eval(res.text,globals)['entity']
+    except:
+        return 'NA',0
+
+    des = content['description']
+
+    nation = ' '
+
+    for i in range(len(Nation)):
+        count=0
+        if Nation['nation'][i] in des or Nation['nationality'][i] in des:
+            if count>1:
+                nation = des
+                break
+            nation = Nation['nation'][i]
+            count = count + 1
+            continue
+
+    for i in range(len(nation)):
+        for j in range(len(AN['A'])):
+            if nation[i] == AN['A'][j]:
+                nation[i] = AN['N'][j]
+                break
+
+
+    if len(nation) == 1:
+        return des
+    return nation
 
 def author1nd(df):
     u = 'https://academic.microsoft.com/api/entity/author/'
@@ -99,10 +124,9 @@ def author1nd(df):
     link = u + str(authorid) + '?paperId=' + str(paperid)
 
     res = ''
-    while res == '':
-
+    while res == '' or len(res.text)<2:
         try:
-            res = requests.get(url=link, headers=header, verify=False)
+            res = requests.get(url=link, headers=header, verify=False,timeout=10)
         except:
             print('sleep for 5 sec before retry')
             time.sleep(5)
@@ -114,65 +138,17 @@ def author1nd(df):
     }
     content = eval(res.text, globals)['entity']
 
-    TotalPub = pd.DataFrame({'TotalPub':[content['publicationCount']]})
-    TotalCit = pd.DataFrame({'TotalCite': [content['citationCnt']]})
-    Total = pd.concat((TotalPub,TotalCit),axis=1,ignore_index=True)
+    Total = pd.DataFrame({'FirstPub':[content['publicationCount']],'FirstCite': [content['citationCnt']]})
 
-    YearlyPub = databyYear(content['publicationCountByYear'],'pub')
-    YearlyCite = databyYear(content['citationCountByYear'],'cite')
+    YearlyPub = clearup(content['publicationCountByYear'],'pub')
+    YearlyCite = clearup(content['citationCountByYear'],'cite')
     byear = pd.concat((YearlyCite,YearlyPub),axis=1,ignore_index=False,sort=True)
     return Total,byear
-
-
-def CountrySearch(ID):
-
-    u = 'https://academic.microsoft.com/api/entity/'
-    link = u + str(ID)+ '?entityType=6'
-    header = {'accept': 'application/json',
-        'content-type': 'application/json',
-        'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/73.0.3683.86 Safari/537.36'
-    }
-    res = ''
-    while res == '':
-        try:
-            res = requests.get(url=link,headers=header, verify=False)
-        except:
-            print('sleep for 5 sec before retry')
-            time.sleep(5)
-            continue
-
-    globals = {
-        'true': 0,
-        'false': 1
-    }
-    if len(res.text)==0:
-        return 'NA',0
-        
-    content = eval(res.text,globals)['entity']
-    des = content['description']
-
-    num_educ = ifeduc(des)
-    nation = ' '
-    for i in range(len(Nation)):
-
-        if Nation['nation'][i] in des or Nation['nationality'][i] in des:
-            if len(nation)>1:
-                nation = des
-                break
-            nation = Nation['nation'][i]
-            continue
-
-    if len(nation) == 1:
-        return des,num_educ
-    return nation,num_educ
-
-
 
 def authors(df):
     authorlist = df['paperResult']['authors']
     FirstAuthor = df['paperResult']['authors'][0]
     l = len(df['paperResult']['authors'])
-    educs = [0] * l
     country = ['NA'] * l
 
     for i in range(l):
@@ -180,81 +156,115 @@ def authors(df):
             continue
         else:
             if ifna('id',authorlist[i]['currentInstitution']):
-                continue
+                country[i] = authorlist[i]['currentInstitution']['displayName']
+                for i in range(len(AN)):
+                    if country[i] == AN['A'][i]:
+                        country[i] = AN['N'][i]
+                        break
+
             else:
                 time.sleep(1)
                 id = authorlist[i]['currentInstitution']['id']
-                country[i],educs[i] = CountrySearch(id)
+                country[i]= CountrySearch(id)
+                if country[i]=='NA':
+                    for i in range(len(AA)):
+                        if authorlist[i]['diaplayName'] == AA['A'][i]:
+                            country[i] = AA['N'][i]
+                            break
 
-    #print(country)
-    num_educ = sum(educs)
+
 
     if ifna('displayName',FirstAuthor):
         FirstA = 'NA'
     else:
         FirstA = FirstAuthor['displayName']
 
-    if ifna('currentInstitution',FirstAuthor):
-        FirstIns = 'NA'
+
+    if ifna('id', FirstAuthor['currentInstitution']):
+        FirstIns=FirstAuthor['currentInstitution']['displayName']
+        FirstNation= 'NA'
+        for i in range(len(AA)):
+            if FirstA == AA['A'][i]:
+                FirstNation = AA['N'][i]
+                break
+        for i in range(len(AN)):
+            if FirstIns == AN['A'][i]:
+                FirstNation = AN['N'][i]
+                break
     else:
-        if ifna('displayName',FirstAuthor['currentInstitution']):
-            FirstIns='NA'
-            FirstNation, FirstEduc = 'NA',0
+        if ifna('displayName', FirstAuthor['currentInstitution']):
+            try:
+                F = df['paperResult']['authors'][1]
+                FirstIns = F['currentInstitution']['displayName']
+                FirstNation =CountrySearch(F['currentInstitution']['id'])
+                for i in range(len(AN)):
+                    if FirstIns == AN['A'][i]:
+                        FirstNation = AN['N'][i]
+                        break
+            except:
+                FirstIns ='NA'
+                FirstNation = 'NA'
+
+            if FirstNation == 'NA' :
+                for i in range(len(AA)):
+                    if FirstA == AA['A'][i]:
+                        FirstNation = AA['N'][i]
+                        break
+
         else:
             FirstIns = FirstAuthor['currentInstitution']['displayName']
             insID = FirstAuthor['currentInstitution']['id']
             try:
-                FirstNation,FirstEduc = CountrySearch(insID)
+                FirstNation = CountrySearch(insID)
+                for i in range(len(AN)):
+                    if FirstIns == AN['A'][i]:
+                        FirstNation = AN['N'][i]
+                        break
             except:
-                FirstNation, FirstEduc = 'NA', 0
+                FirstNation='NA'
+
+
 
     N = {}
     for j in country:
-        if j == 'NA':
-            continue
-        else:
-            N[j] = country.count(j)
+        N[j] = country.count(j)
     Nations = pd.DataFrame([list(N.values())], columns=list(N.keys()))
     info = pd.DataFrame({'FirstAuthor':[FirstA],
                          'FirstIns':[FirstIns],
-                         'IsFirstEduc':[FirstEduc],
-                         'num_edu':[num_educ],
-                         'num_authors':[l]})
+                         'FirstNation': [FirstNation],
+                         'Num_authors':[l]})
     return info,Nations
 
-
-
-
+def ifna(name,ele):
+    if name in list(ele.keys()):
+        return False
+    else:
+        return True
 
 def getinfo(content):
     numByear = pd.DataFrame({'T': [10000000]})
     Nations = pd.DataFrame({'T': ['aaaaa']})
     Head = pd.DataFrame({'T': ['A']})
-    for j in range(10):
+    for j in range(len(content['paperResults'])):
         df = pd.DataFrame(content['paperResults'][j])
         time.sleep(1)
         Total,Byear = author1nd(df)
         PubDate = df['paperResult']['venueInfo']['publishedDate'][0:4]
+        Journal = df['paperResult']['venueInfo']['displayName']
         Author, N = authors(df)
-        #Fields = field(df)
 
         if ifna('citationCnt',df['paperResult']):
             Citation = -1
         else:
             Citation = df['paperResult']['citationCnt']
-        if ifna('estimatedCitationCnt', df['paperResult']):
-            estCiteCnt = -1
-        else:
-            estCiteCnt = df['paperResult']['estimatedCitationCnt']
-        if ifna('displayName',df['paperResult']):
-            Title = None
-        else:
-            Title = df['paperResult']['displayName']
-        Info = pd.DataFrame({'Title':[Title],'Pubdate':[PubDate],'Citation':[Citation],
-                             'estCiteCnt':[estCiteCnt]})
-        numByear = pd.concat((numByear,Byear),axis=0,ignore_index=True,                                 sort=True)
+            if ifna('displayName',df['paperResult']):
+                Title = None
+            else:
+                Title = df['paperResult']['displayName']
+        Info = pd.DataFrame({'Journal':[Journal],'Title':[Title],'PubYear':[PubDate],'Citation':[Citation]})
+        numByear = pd.concat((numByear,Byear),axis=0,ignore_index=True, sort=True)
         Nations = pd.concat((Nations,N),axis=0,ignore_index=True,sort=True)
-        Info = pd.concat((Info,Total,Author), axis=1,ignore_index=True, sort=False)
+        Info = pd.concat((Info,Total,Author), axis=1,sort=False)
         Head = pd.concat((Head,Info), axis=0,ignore_index=True, sort=False)
 
     Head.drop('T',inplace=True,axis=1)
@@ -263,35 +273,53 @@ def getinfo(content):
 
     return Head,Nations,numByear
 
+def scrap(end,conf):
+    if conf =="AAAI":
+        confilter=["Pt='3'", "Composite(F.FId=154945302)", "Composite(C.CId=1184914352)", "Y>=2015"]
+    if conf == "ECCV":
+        confilter=["Pt='3'","Composite(F.FId=154945302)","Composite(C.CId=1124077590)","Y>=2015"]
+    if conf=="ICML":
+        confilter =["Pt='3'", "Composite(F.FId=154945302)", "Composite(C.CId=1180662882)", "Y>=2015"]
+    if conf =="CVPR":
+        confilter =["Pt='3'","Composite(F.FId=154945302)","Composite(C.CId=1158167855)","Y>=2015"]
 
+    if conf == "ICLR":
+        confilter =["Pt='3'", "Composite(F.FId=154945302)","Composite(C.CId=2584161585)", "Y>=2015"]
+    if conf == "NIPS":
+        confilter=["Pt='3'", "Composite(F.FId=154945302)", "Composite(C.CId=1127325140)", "Y>=2016"]
 
-url = 'https://academic.microsoft.com/api/search'
+    url = 'https://academic.microsoft.com/api/search'
 
-head = pd.DataFrame({'kk':['A']})
-nation = pd.DataFrame({'cc':['vv']})
-numbyear = pd.DataFrame({'pub':[0000]})
+    head = pd.DataFrame({'kk':['A']})
+    nation = pd.DataFrame({'cc':['vv']})
+    numbyear = pd.DataFrame({'pub':[0000]})
 
-count = 1
-num = 17
-for series in range(10):
-    time.sleep(1)
-    for i in range(num*series,num*(series+1)):
+    count = 1
+    num = 17
+    for series in range(end):
         time.sleep(1)
-        page = i*10
-        content = postsearch(url,page)
-        Head, Nations, numByear = getinfo(content)
-        head = pd.concat((head,Head),axis=0,ignore_index=True,sort=False)
-        nation = pd.concat((nation,Nations),axis=0,ignore_index=True,sort=True)
-        numbyear = pd.concat((numbyear,numByear),axis=0,ignore_index=True,sort=True)
-        print(count)
-        count = count+1
+        for i in range(num*series,num*(series+1)):
+            time.sleep(1)
+            page = i*10
+            content = postsearch(url,page,confilter)
+            Head, Nations, numByear = getinfo(content)
+            head = pd.concat((head,Head),axis=0,ignore_index=True,sort=False)
+            nation = pd.concat((nation,Nations),axis=0,ignore_index=True,sort=True)
+            numbyear = pd.concat((numbyear,numByear),axis=0,ignore_index=True,sort=True)
+            print(i+1)
 
+    head.drop('kk',inplace=True,axis=1)
+    numbyear.drop('pub',inplace=True,axis=1)
+    nation.drop('cc',inplace=True,axis=1)
+    numbyear = numbyear[['cite2014','cite2015','cite2016','cite2017','cite2018','cite2019',
+                         'pub2013','pub2014', 'pub2015', 'pub2016', 'pub2017', 'pub2018', 'pub2019']]
 
+    head = pd.concat((head,numbyear),axis=1,sort=None)
+    headname = conf+"_head.csv"
+    nationname = conf+"_nation.csv"
+    yearname = conf+"_year.csv"
 
-head.drop('kk',inplace=True,axis=1)
-numbyear.drop('pub',inplace=True,axis=1)
-nation.drop('cc',inplace=True,axis=1)
+    head.to_csv(headname, header=True)
+    nation.to_csv(nationname, header=True)
+    numbyear.to_csv(yearname, header=True)
 
-head.to_csv('ICML_head.csv', header=True)
-nation.to_csv('ICML_nation.csv', header=True)
-numbyear.to_csv('ICML_byear.csv', header=True)
